@@ -1,0 +1,13 @@
+services:
+  beat-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        YTDLP_PATH: ${YTDLP_PATH}
+        NODE_ENV: ${NODE_ENV}
+        PORT: ${PORT}
+        HOST: ${HOST}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

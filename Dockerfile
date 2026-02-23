@@ -12,12 +12,6 @@ COPY . .
 # Make the Linux yt-dlp binary executable
 RUN chmod +x bin/yt-dlp_linux_aarch64
 
-# Use the Linux binary at runtime
-ENV YTDLP_PATH=/app/bin/yt-dlp_linux_aarch64
-ENV NODE_ENV=production
-ENV PORT=3000
-ENV HOST=0.0.0.0
-
 EXPOSE 3000
 
 CMD ["node", "server.js"]
