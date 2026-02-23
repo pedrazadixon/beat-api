@@ -15,6 +15,13 @@ const router = express.Router();
 // yt-dlp binary path
 const YTDLP_PATH = process.env.YTDLP_PATH || path.join(__dirname, '..', '..', 'bin', 'yt-dlp.exe');
 
+// Cookie file path (optional)
+const YTDLP_COOKIE_FILE = process.env.YT_COOKIE_FILE || null;
+
+function getCookieArgs() {
+  return YTDLP_COOKIE_FILE ? ['--cookies', YTDLP_COOKIE_FILE] : [];
+}
+
 /**
  * Execute yt-dlp and return the result.
  */
@@ -59,6 +66,7 @@ router.get('/extract', async (req, res) => {
       '-x',
       '--audio-format', 'best',
       '-g',
+      ...getCookieArgs(),
       targetUrl,
     ];
 
@@ -118,6 +126,7 @@ router.get('/info', async (req, res) => {
       '--no-playlist',
       '-x',
       '--audio-format', 'best',
+      ...getCookieArgs(),
       targetUrl,
     ];
 
@@ -277,7 +286,7 @@ router.get('/play', async (req, res) => {
     }
 
     // Step 1: Extract stream URL
-    const args = ['-x', '--audio-format', 'best', '-g', targetUrl];
+    const args = ['-x', '--audio-format', 'best', '-g', ...getCookieArgs(), targetUrl];
     const output = await runYtDlp(args);
     const streamUrl = output.split('\n').filter(Boolean)[0];
 
