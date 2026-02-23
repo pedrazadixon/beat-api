@@ -1,25 +1,27 @@
 /**
  * yt-dlp Routes
- * 
+ *
  * Endpoint 1: Extract streamable audio URL using yt-dlp
  * Endpoint 2: Proxy/stream the extracted audio URL in real-time
  */
 
-const express = require('express');
-const { execFile } = require('child_process');
-const path = require('path');
-const axios = require('axios');
+const express = require("express");
+const { execFile } = require("child_process");
+const path = require("path");
+const axios = require("axios");
 
 const router = express.Router();
 
 // yt-dlp binary path
-const YTDLP_PATH = process.env.YTDLP_PATH || path.join(__dirname, '..', '..', 'bin', 'yt-dlp.exe');
+const YTDLP_PATH =
+  process.env.YTDLP_PATH ||
+  path.join(__dirname, "..", "..", "bin", "yt-dlp.exe");
 
 // Cookie file path (optional)
 const YTDLP_COOKIE_FILE = process.env.YT_COOKIE_FILE || null;
 
 function getCookieArgs() {
-  return YTDLP_COOKIE_FILE ? ['--cookies', YTDLP_COOKIE_FILE] : [];
+  return YTDLP_COOKIE_FILE ? ["--cookies", YTDLP_COOKIE_FILE] : [];
 }
 
 /**
@@ -29,7 +31,9 @@ function runYtDlp(args, timeout = 30000) {
   return new Promise((resolve, reject) => {
     execFile(YTDLP_PATH, args, { timeout }, (error, stdout, stderr) => {
       if (error) {
-        return reject(new Error(`yt-dlp error: ${error.message}. stderr: ${stderr}`));
+        return reject(
+          new Error(`yt-dlp error: ${error.message}. stderr: ${stderr}`),
+        );
       }
       resolve(stdout.trim());
     });
@@ -42,11 +46,11 @@ function runYtDlp(args, timeout = 30000) {
  * GET /api/stream/extract?videoId=xxxx
  *   or
  * GET /api/stream/extract?url=https://youtube.com/watch?v=xxxx
- * 
+ *
  * Runs: yt-dlp -x --audio-format best -g "URL"
  * Returns the direct streamable URL(s).
  */
-router.get('/extract', async (req, res) => {
+router.get("/extract", async (req, res) => {
   try {
     const { videoId, url } = req.query;
 
@@ -63,9 +67,10 @@ router.get('/extract', async (req, res) => {
     }
 
     const args = [
-      '-x',
-      '--audio-format', 'best',
-      '-g',
+      "-x",
+      "--audio-format",
+      "best",
+      "-g",
       ...getCookieArgs(),
       targetUrl,
     ];
@@ -73,7 +78,7 @@ router.get('/extract', async (req, res) => {
     const output = await runYtDlp(args);
 
     // yt-dlp -g can return multiple URLs (one per format), split by newlines
-    const urls = output.split('\n').filter(Boolean);
+    const urls = output.split("\n").filter(Boolean);
 
     res.json({
       success: true,
@@ -91,7 +96,7 @@ router.get('/extract', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('[YTDLP_EXTRACT_ERROR]', err.message);
+    console.error("[YTDLP_EXTRACT_ERROR]", err.message);
     res.status(500).json({
       success: false,
       error: `Failed to extract stream URL: ${err.message}`,
@@ -101,11 +106,11 @@ router.get('/extract', async (req, res) => {
 
 /**
  * GET /api/stream/info?videoId=xxxx
- * 
+ *
  * Runs: yt-dlp -j "URL"
  * Returns full metadata as JSON.
  */
-router.get('/info', async (req, res) => {
+router.get("/info", async (req, res) => {
   try {
     const { videoId, url } = req.query;
 
@@ -122,10 +127,11 @@ router.get('/info', async (req, res) => {
     }
 
     const args = [
-      '--dump-json',
-      '--no-playlist',
-      '-x',
-      '--audio-format', 'best',
+      "--dump-json",
+      "--no-playlist",
+      "-x",
+      "--audio-format",
+      "best",
       ...getCookieArgs(),
       targetUrl,
     ];
@@ -155,12 +161,15 @@ router.get('/info', async (req, res) => {
           filesize: f.filesize,
           url: f.url,
         })),
-        bestAudioUrl: info.url || info.formats?.filter((f) => f.acodec !== 'none' && f.vcodec === 'none')
-          .sort((a, b) => (b.abr || 0) - (a.abr || 0))?.[0]?.url,
+        bestAudioUrl:
+          info.url ||
+          info.formats
+            ?.filter((f) => f.acodec !== "none" && f.vcodec === "none")
+            .sort((a, b) => (b.abr || 0) - (a.abr || 0))?.[0]?.url,
       },
     });
   } catch (err) {
-    console.error('[YTDLP_INFO_ERROR]', err.message);
+    console.error("[YTDLP_INFO_ERROR]", err.message);
     res.status(500).json({
       success: false,
       error: `Failed to get stream info: ${err.message}`,
@@ -172,13 +181,13 @@ router.get('/info', async (req, res) => {
 
 /**
  * GET /api/stream/proxy?url=ENCODED_STREAM_URL
- * 
+ *
  * Acts as a reverse proxy: receives the direct stream URL from yt-dlp
  * and pipes the response to the client in real-time.
  * This is necessary because yt-dlp generated URLs are typically
  * IP-locked to the server that requested them.
  */
-router.get('/proxy', async (req, res) => {
+router.get("/proxy", async (req, res) => {
   try {
     const { url: streamUrl } = req.query;
 
@@ -191,17 +200,18 @@ router.get('/proxy', async (req, res) => {
 
     // Forward range headers if present (for seeking support)
     const requestHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0',
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
     };
 
     if (req.headers.range) {
-      requestHeaders['Range'] = req.headers.range;
+      requestHeaders["Range"] = req.headers.range;
     }
 
     const response = await axios({
-      method: 'get',
+      method: "get",
       url: streamUrl,
-      responseType: 'stream',
+      responseType: "stream",
       headers: requestHeaders,
       timeout: 0, // No timeout for streaming
       maxRedirects: 5,
@@ -209,11 +219,11 @@ router.get('/proxy', async (req, res) => {
 
     // Forward relevant headers to the client
     const headersToForward = [
-      'content-type',
-      'content-length',
-      'content-range',
-      'accept-ranges',
-      'cache-control',
+      "content-type",
+      "content-length",
+      "content-range",
+      "accept-ranges",
+      "cache-control",
     ];
 
     headersToForward.forEach((header) => {
@@ -223,9 +233,12 @@ router.get('/proxy', async (req, res) => {
     });
 
     // Set CORS headers for audio playback
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Range');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Length, Content-Range, Accept-Ranges",
+    );
 
     // Set appropriate status (206 for partial content, 200 for full)
     const statusCode = response.status === 206 ? 206 : 200;
@@ -235,22 +248,21 @@ router.get('/proxy', async (req, res) => {
     response.data.pipe(res);
 
     // Handle stream errors
-    response.data.on('error', (err) => {
-      console.error('[STREAM_PROXY_ERROR] Stream error:', err.message);
+    response.data.on("error", (err) => {
+      console.error("[STREAM_PROXY_ERROR] Stream error:", err.message);
       if (!res.headersSent) {
-        res.status(502).json({ success: false, error: 'Stream error' });
+        res.status(502).json({ success: false, error: "Stream error" });
       } else {
         res.end();
       }
     });
 
     // Handle client disconnect
-    req.on('close', () => {
+    req.on("close", () => {
       response.data.destroy();
     });
-
   } catch (err) {
-    console.error('[STREAM_PROXY_ERROR]', err.message);
+    console.error("[STREAM_PROXY_ERROR]", err.message);
     if (!res.headersSent) {
       res.status(502).json({
         success: false,
@@ -264,12 +276,12 @@ router.get('/proxy', async (req, res) => {
 
 /**
  * GET /api/stream/play?videoId=xxxx
- * 
+ *
  * Convenience endpoint: extracts the audio URL using yt-dlp,
  * then immediately streams it as an audio proxy.
  * Can be used directly as an audio src.
  */
-router.get('/play', async (req, res) => {
+router.get("/play", async (req, res) => {
   try {
     const { videoId, url: inputUrl } = req.query;
 
@@ -286,64 +298,81 @@ router.get('/play', async (req, res) => {
     }
 
     // Step 1: Extract stream URL
-    const args = ['-x', '--audio-format', 'best', '-g', ...getCookieArgs(), targetUrl];
+    const args = [
+      ...getCookieArgs(),
+      "--js-runtimes",
+      "node",
+      "-x",
+      "--audio-format",
+      "best",
+      "-g",
+      targetUrl,
+    ];
     const output = await runYtDlp(args);
-    const streamUrl = output.split('\n').filter(Boolean)[0];
+    const streamUrl = output.split("\n").filter(Boolean)[0];
 
     if (!streamUrl) {
       return res.status(502).json({
         success: false,
-        error: 'Could not extract stream URL',
+        error: "Could not extract stream URL",
       });
     }
 
     // Step 2: Proxy the stream
     const requestHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0',
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
     };
 
     if (req.headers.range) {
-      requestHeaders['Range'] = req.headers.range;
+      requestHeaders["Range"] = req.headers.range;
     }
 
     const response = await axios({
-      method: 'get',
+      method: "get",
       url: streamUrl,
-      responseType: 'stream',
+      responseType: "stream",
       headers: requestHeaders,
       timeout: 0,
       maxRedirects: 5,
     });
 
-    const headersToForward = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
+    const headersToForward = [
+      "content-type",
+      "content-length",
+      "content-range",
+      "accept-ranges",
+    ];
     headersToForward.forEach((header) => {
       if (response.headers[header]) {
         res.setHeader(header, response.headers[header]);
       }
     });
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Range');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range");
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Length, Content-Range, Accept-Ranges",
+    );
 
     res.status(response.status === 206 ? 206 : 200);
     response.data.pipe(res);
 
-    response.data.on('error', (err) => {
-      console.error('[PLAY_STREAM_ERROR]', err.message);
+    response.data.on("error", (err) => {
+      console.error("[PLAY_STREAM_ERROR]", err.message);
       if (!res.headersSent) {
-        res.status(502).json({ success: false, error: 'Stream error' });
+        res.status(502).json({ success: false, error: "Stream error" });
       } else {
         res.end();
       }
     });
 
-    req.on('close', () => {
+    req.on("close", () => {
       response.data.destroy();
     });
-
   } catch (err) {
-    console.error('[PLAY_ERROR]', err.message);
+    console.error("[PLAY_ERROR]", err.message);
     if (!res.headersSent) {
       res.status(500).json({
         success: false,
