@@ -3,7 +3,8 @@
  * Translated from YouTubeClient.kt & YouTubeConstants.kt
  */
 
-const USER_AGENT_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
+// const USER_AGENT_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0';
+const USER_AGENT_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
 const ORIGIN_YOUTUBE_MUSIC = 'https://music.youtube.com';
 const REFERER_YOUTUBE_MUSIC = `${ORIGIN_YOUTUBE_MUSIC}/`;
