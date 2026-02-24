@@ -17,11 +17,9 @@ const YTDLP_PATH =
   process.env.YTDLP_PATH ||
   path.join(__dirname, "..", "..", "bin", "yt-dlp.exe");
 
-
 function getCookieArgs() {
   const cookieFile = path.join(__dirname, "..", "..", "cookies.txt");
-  if (fs.existsSync(cookieFile))
-    return ["--cookies", cookieFile];
+  if (fs.existsSync(cookieFile)) return ["--cookies", cookieFile];
   return [];
 }
 
@@ -68,11 +66,13 @@ router.get("/extract", async (req, res) => {
     }
 
     const args = [
+      ...getCookieArgs(),
+      "--js-runtimes",
+      "node",
       "-x",
       "--audio-format",
       "best",
       "-g",
-      ...getCookieArgs(),
       targetUrl,
     ];
 
