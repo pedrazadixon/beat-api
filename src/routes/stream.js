@@ -9,7 +9,6 @@ const express = require("express");
 const { execFile } = require("child_process");
 const path = require("path");
 const axios = require("axios");
-
 const router = express.Router();
 
 // yt-dlp binary path
@@ -17,11 +16,12 @@ const YTDLP_PATH =
   process.env.YTDLP_PATH ||
   path.join(__dirname, "..", "..", "bin", "yt-dlp.exe");
 
-// Cookie file path (optional)
-const YTDLP_COOKIE_FILE = process.env.YT_COOKIE_FILE || null;
 
 function getCookieArgs() {
-  return YTDLP_COOKIE_FILE ? ["--cookies", YTDLP_COOKIE_FILE] : [];
+  const cookieFile = path.join(__dirname, "..", "..", "cookies.txt");
+  if (fs.existsSync(cookieFile))
+    return ["--cookies", cookieFile];
+  return [];
 }
 
 /**
