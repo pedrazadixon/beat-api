@@ -10,6 +10,7 @@ const { execFile } = require("child_process");
 const path = require("path");
 const axios = require("axios");
 const router = express.Router();
+const fs = require("fs");
 
 // yt-dlp binary path
 const YTDLP_PATH =
