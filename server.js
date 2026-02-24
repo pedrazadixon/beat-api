@@ -11,6 +11,10 @@
 
 require('dotenv').config();
 
+const path = require('path');
+const fs   = require('fs');
+const { cookieStringToNetscape } = require('./src/utils/convertCookies');
+
 const express = require('express');
 const cors = require('cors');
 
@@ -162,6 +166,17 @@ app.use((err, req, res, _next) => {
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 });
+
+// ─── Make cookie file from YT_COOKIE ────────────────
+
+if (process.env.YT_COOKIE) {
+  const cookiePath = path.join(__dirname, 'cookies.txt');
+  const netscapeContent = cookieStringToNetscape(process.env.YT_COOKIE);
+  fs.writeFileSync(cookiePath, netscapeContent, 'utf8');
+  console.log('🍪 cookies.txt generated from YT_COOKIE');
+} else {
+  console.warn('⚠️ YT_COOKIE environment variable not set.');
+}
 
 // ─── Start Server ───────────────────────────────────
 
