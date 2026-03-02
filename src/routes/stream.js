@@ -11,6 +11,8 @@ const path = require("path");
 const axios = require("axios");
 const router = express.Router();
 const fs = require("fs");
+const { getVideoLinks } = require('../utils/youtubeiLinkExtract');
+
 
 // yt-dlp binary path
 const YTDLP_PATH =
@@ -39,6 +41,42 @@ function runYtDlp(args, timeout = 30000) {
   });
 }
 
+/**
+ * GET /api/stream/extract?videoId=xxxx
+ */
+
+router.get("/extract", async (req, res) => {
+  try {
+    const { videoId, url } = req.query;
+
+    const links = await getVideoLinks(videoId);
+
+    if (links.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No stream URLs found',
+      });
+    }
+
+    const streamUrl = links[0].url;
+
+    res.json({
+      success: true,
+      data: {
+        streamUrl: streamUrl || null,
+      },
+    });
+
+  } catch (err) {
+    console.error("[YTDLP_EXTRACT_ERROR]", err.message);
+    res.status(500).json({
+      success: false,
+      error: `Failed to extract stream URL: ${err.message}`,
+    });
+  }
+});
+
+
 // ─── Endpoint 1: Extract Audio Stream URL ───────────
 
 /**
@@ -49,7 +87,7 @@ function runYtDlp(args, timeout = 30000) {
  * Runs: yt-dlp -x --audio-format best -g "URL"
  * Returns the direct streamable URL(s).
  */
-router.get("/extract", async (req, res) => {
+router.get("/extract_old", async (req, res) => {
   try {
     const { videoId, url } = req.query;
 
