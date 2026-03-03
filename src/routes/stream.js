@@ -1,7 +1,7 @@
 /**
- * yt-dlp Routes
+ * Stream Routes
  *
- * Endpoint 1: Extract streamable audio URL using yt-dlp
+ * Endpoint 1: Extract streamable audio URL using youtubei.js (Innertube)
  * Endpoint 2: Proxy/stream the extracted audio URL in real-time
  */
 
@@ -11,7 +11,29 @@ const path = require("path");
 const axios = require("axios");
 const router = express.Router();
 const fs = require("fs");
-const { getVideoLinks } = require('../utils/youtubeiLinkExtract');
+const { Innertube, UniversalCache, Platform } = require('youtubei.js');
+
+Platform.shim.eval = async (data, env) => {
+    const properties = [];
+    if (env.n) properties.push(`n: exportedVars.nFunction("${env.n}")`);
+    if (env.sig) properties.push(`sig: exportedVars.sigFunction("${env.sig}")`);
+    const code = `${data.output}\nreturn { ${properties.join(', ')} }`;
+    return new Function(code)();
+};
+
+
+// Lazy singleton for Innertube instance
+let _innertube = null;
+async function getInnertube() {
+  if (!_innertube) {
+    _innertube = await Innertube.create({
+      cache: new UniversalCache(false),
+      generate_session_locally: true,
+      cookie: process.env.YT_COOKIE || '',
+    });
+  }
+  return _innertube;
+}
 
 
 // yt-dlp binary path
@@ -47,29 +69,44 @@ function runYtDlp(args, timeout = 30000) {
 
 router.get("/extract", async (req, res) => {
   try {
-    const { videoId, url } = req.query;
+    const { videoId } = req.query;
 
-    const links = await getVideoLinks(videoId);
-
-    if (links.length === 0) {
-      return res.status(404).json({
+    if (!videoId) {
+      return res.status(400).json({
         success: false,
-        error: 'No stream URLs found',
+        error: '"videoId" query parameter is required',
       });
     }
 
-    const streamUrl = links[0].url;
+    const innertube = await getInnertube();
+    const info = await innertube.getBasicInfo(videoId);
+
+    // YouTube uses SABR for adaptive formats (no individual URLs).
+    // Only the combined video+audio format (itag 18) has a decodable URL.
+    const format = info.chooseFormat({
+      type: 'video+audio',
+      quality: 'best',
+      format: 'mp4',
+    });
+
+    const streamUrl = await format.decipher(innertube.session.player);
 
     res.json({
       success: true,
       data: {
         rawUrl: streamUrl || null,
         streamUrl: encodeURIComponent(streamUrl),
+        mime_type: format.mime_type,
+        bitrate: format.bitrate,
+        quality: format.audio_quality || 'N/A',
+        duration: info.basic_info?.duration || 0,
+        title: info.basic_info?.title || '',
       },
     });
-
   } catch (err) {
-    console.error("[YTDLP_EXTRACT_ERROR]", err.message);
+    console.error("[EXTRACT_ERROR]", err.message);
+    // Reset innertube instance on error so next request creates a fresh one
+    _innertube = null;
     res.status(500).json({
       success: false,
       error: `Failed to extract stream URL: ${err.message}`,
@@ -222,32 +259,40 @@ router.get("/info", async (req, res) => {
 /**
  * GET /api/stream/proxy?url=ENCODED_STREAM_URL
  *
- * Acts as a reverse proxy: receives the direct stream URL from yt-dlp
- * and pipes the response to the client in real-time.
- * This is necessary because yt-dlp generated URLs are typically
- * IP-locked to the server that requested them.
+ * Acts as a reverse proxy for YouTube stream URLs.
+ * Necessary because stream URLs are IP-locked to the server that requested them.
  */
+router.options("/proxy", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Range");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
+  res.status(204).end();
+});
+
 router.get("/proxy", async (req, res) => {
   try {
-    let streamUrl;
-
     const { url } = req.query;
 
-    streamUrl = decodeURIComponent(url);
-
-    if (!streamUrl) {
+    if (!url) {
       return res.status(400).json({
         success: false,
         error: 'Query parameter "url" is required',
       });
     }
 
-    // Forward range headers if present (for seeking support)
+    const streamUrl = decodeURIComponent(url);
+
+    // Headers to mimic a YouTube web client request
     const requestHeaders = {
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      accept: "*/*",
+      referer: "https://www.youtube.com/",
+      origin: "https://www.youtube.com",
     };
 
+    // Forward range headers for seeking support
     if (req.headers.range) {
       requestHeaders["Range"] = req.headers.range;
     }
@@ -257,13 +302,13 @@ router.get("/proxy", async (req, res) => {
       url: streamUrl,
       responseType: "stream",
       headers: requestHeaders,
-      timeout: 0, // No timeout for streaming
+      timeout: 0,
       maxRedirects: 5,
+      validateStatus: (status) => status >= 200 && status < 400,
     });
 
     // Forward relevant headers to the client
     const headersToForward = [
-      "content-type",
       "content-length",
       "content-range",
       "accept-ranges",
@@ -276,17 +321,30 @@ router.get("/proxy", async (req, res) => {
       }
     });
 
-    // Set CORS headers for audio playback
+    // Normalize Content-Type: YouTube returns "video/mp4" for combined streams,
+    // but browsers block "video/*" MIME via ORB when loaded by an <audio> element.
+    // Force "audio/mp4" so the browser accepts it for audio playback.
+    let contentType = response.headers["content-type"] || "application/octet-stream";
+    if (contentType.startsWith("video/mp4")) {
+      contentType = "audio/mp4";
+    }
+    res.setHeader("Content-Type", contentType);
+
+    // Ensure accept-ranges is set for seeking
+    if (!response.headers["accept-ranges"]) {
+      res.setHeader("Accept-Ranges", "bytes");
+    }
+
+    // CORS headers
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Range");
     res.setHeader(
       "Access-Control-Expose-Headers",
-      "Content-Length, Content-Range, Accept-Ranges",
+      "Content-Length, Content-Range, Accept-Ranges, Content-Type",
     );
 
     // Set appropriate status (206 for partial content, 200 for full)
-    const statusCode = response.status === 206 ? 206 : 200;
-    res.status(statusCode);
+    res.status(response.status === 206 ? 206 : 200);
 
     // Pipe the stream to the client
     response.data.pipe(res);
@@ -306,9 +364,10 @@ router.get("/proxy", async (req, res) => {
       response.data.destroy();
     });
   } catch (err) {
-    console.error("[STREAM_PROXY_ERROR]", err.message);
+    const status = err.response?.status || 502;
+    console.error(`[STREAM_PROXY_ERROR] ${status}:`, err.message);
     if (!res.headersSent) {
-      res.status(502).json({
+      res.status(status >= 400 && status < 600 ? status : 502).json({
         success: false,
         error: `Proxy stream failed: ${err.message}`,
       });
@@ -321,51 +380,46 @@ router.get("/proxy", async (req, res) => {
 /**
  * GET /api/stream/play?videoId=xxxx
  *
- * Convenience endpoint: extracts the audio URL using yt-dlp,
+ * Convenience endpoint: extracts the audio URL using Innertube,
  * then immediately streams it as an audio proxy.
  * Can be used directly as an audio src.
  */
 router.get("/play", async (req, res) => {
   try {
-    const { videoId, url: inputUrl } = req.query;
+    const { videoId } = req.query;
 
-    let targetUrl;
-    if (videoId) {
-      targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    } else if (inputUrl) {
-      targetUrl = inputUrl;
-    } else {
+    if (!videoId) {
       return res.status(400).json({
         success: false,
-        error: 'Either "videoId" or "url" query parameter is required',
+        error: '"videoId" query parameter is required',
       });
     }
 
-    // Step 1: Extract stream URL
-    const args = [
-      ...getCookieArgs(),
-      "--js-runtimes",
-      "node",
-      "-x",
-      "--audio-format",
-      "best",
-      "-g",
-      targetUrl,
-    ];
-    const output = await runYtDlp(args);
-    const streamUrl = output.split("\n").filter(Boolean)[0];
+    const innertube = await getInnertube();
+    const info = await innertube.getBasicInfo(videoId);
+
+    const format = info.chooseFormat({
+      type: 'video+audio',
+      quality: 'best',
+      format: 'mp4',
+    });
+
+    const streamUrl = await format.decipher(innertube.session.player);
 
     if (!streamUrl) {
       return res.status(502).json({
         success: false,
-        error: "Could not extract stream URL",
+        error: "Could not decipher stream URL",
       });
     }
 
     // Step 2: Proxy the stream
     const requestHeaders = {
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      accept: "*/*",
+      referer: "https://www.youtube.com/",
+      origin: "https://www.youtube.com",
     };
 
     if (req.headers.range) {
@@ -379,10 +433,10 @@ router.get("/play", async (req, res) => {
       headers: requestHeaders,
       timeout: 0,
       maxRedirects: 5,
+      validateStatus: (status) => status >= 200 && status < 400,
     });
 
     const headersToForward = [
-      "content-type",
       "content-length",
       "content-range",
       "accept-ranges",
@@ -393,11 +447,22 @@ router.get("/play", async (req, res) => {
       }
     });
 
+    // Normalize Content-Type for audio playback
+    let contentType = response.headers["content-type"] || "application/octet-stream";
+    if (contentType.startsWith("video/mp4")) {
+      contentType = "audio/mp4";
+    }
+    res.setHeader("Content-Type", contentType);
+
+    if (!response.headers["accept-ranges"]) {
+      res.setHeader("Accept-Ranges", "bytes");
+    }
+
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Range");
     res.setHeader(
       "Access-Control-Expose-Headers",
-      "Content-Length, Content-Range, Accept-Ranges",
+      "Content-Length, Content-Range, Accept-Ranges, Content-Type",
     );
 
     res.status(response.status === 206 ? 206 : 200);
@@ -417,6 +482,7 @@ router.get("/play", async (req, res) => {
     });
   } catch (err) {
     console.error("[PLAY_ERROR]", err.message);
+    _innertube = null; // Reset on error
     if (!res.headersSent) {
       res.status(500).json({
         success: false,
