@@ -307,8 +307,6 @@ router.get("/proxy", async (req, res) => {
       validateStatus: (status) => status >= 200 && status < 400,
     });
 
-    console.log(response.headers);
-
     // Forward relevant headers to the client
     const headersToForward = [
       "content-length",
